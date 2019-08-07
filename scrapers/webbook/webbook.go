@@ -115,7 +115,7 @@ func createOutputLines(inputLines [][]string, headerRow bool, results [][]Result
 	for i, lineResults := range results {
 		newLine := inputLines[i+header]
 		for _, result := range lineResults {
-			newLine = append(newLine, result.Value)
+			newLine = append(newLine, strings.TrimSpace(result.Value))
 		}
 		lines[i+1] = newLine
 	}

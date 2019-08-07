@@ -1,12 +1,13 @@
+//go:binary-only-package
 package main
 
 import (
 	"bufio"
+	"cas-scraper/scrapers"
+	"cas-scraper/scrapers/webbook"
 	"encoding/csv"
 	"flag"
 	"fmt"
-	"go-cas-scraper/scrapers"
-	"go-cas-scraper/scrapers/webbook"
 	"os"
 	"regexp"
 )
@@ -34,6 +35,9 @@ func main() {
 		fmt.Println("Please provide either -input csv file or -quick single CAS number")
 		os.Exit(1)
 	}
+	if output == "" {
+		output = "-"
+	}
 	if quick == "" {
 		lines = readFile(input)
 	} else {
@@ -43,7 +47,8 @@ func main() {
 	headerRow := checkHeaderRow(lines)
 	casNumberColumn := checkCasColumn(lines, headerRow)
 	//TODO: Refactor to call once for each CAS and allow cycling providers.
-	availableScrapers[source].RunScrape(lines, headerRow, casNumberColumn)
+	outputLines, _ := availableScrapers[source].RunScrape(lines, headerRow, casNumberColumn)
+	writeFile(outputLines, output)
 }
 
 func readFile(filePath string) [][]string {
@@ -97,7 +102,7 @@ func writeFile(lines [][]string, targetFile string) {
 		}*/
 	w := csv.NewWriter(os.Stdout)
 	if targetFile != "-" {
-		f, err := os.OpenFile(targetFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 066)
+		f, err := os.OpenFile(targetFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
 		if err != nil {
 			fmt.Printf("Could not write to file %s, due to: %s.\nPrinting to Stdout", targetFile, err.Error())
 		} else {
