@@ -109,7 +109,7 @@ func writeFile(lines [][]string, targetFile string) {
 			defer f.Close()
 			w = csv.NewWriter(bufio.NewWriter(f))
 		}
-		w.WriteAll(lines)
 	}
+	w.WriteAll(lines)
 
 }

@@ -119,6 +119,5 @@ func createOutputLines(inputLines [][]string, headerRow bool, results [][]Result
 		}
 		lines[i+1] = newLine
 	}
-	fmt.Printf("Lines %s", lines)
 	return lines
 }
