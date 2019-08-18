@@ -23,28 +23,6 @@ type Result struct {
 	Value string
 }
 
-/*
-*Attempts to parse data on CAS numbers provided in CSV format.
- */
-func (s ScrapeWebbook) RunScrape(inputLines [][]string, headerRow bool, casColumn int) ([][]string, error) {
-	startLine := 0
-	if headerRow {
-		startLine = 1
-	}
-	results := make([][]Result, len(inputLines)-startLine)
-	fmt.Printf("Runing webbook scraper %d %s.\n", len(inputLines), inputLines[0:0])
-	for i, line := range inputLines[startLine:] {
-		result, err := parseWebsite(line[casColumn])
-		if err != nil || results == nil || len(results) == 0 {
-			fmt.Printf("Could not retrieve data for CAS-nr: %s: %s", line[casColumn], err.Error())
-		}
-		results[i] = result
-
-	}
-	return createOutputLines(inputLines, headerRow, results), nil
-
-}
-
 func parseWebsite(casNumber string) (results []Result, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -92,6 +70,7 @@ func matchXpath(body string) ([]Result, error) {
 	return []Result{Result{Name: checkHeader.Data, Value: molecularWeight.Data}}, nil
 
 }
+
 func createOutputLines(inputLines [][]string, headerRow bool, results [][]Result) [][]string {
 
 	header := 0

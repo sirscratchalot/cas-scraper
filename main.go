@@ -3,17 +3,24 @@ package main
 
 import (
 	"bufio"
+	csvutil "cas-scraper/csv"
 	"cas-scraper/scrapers"
+	"cas-scraper/scrapers/molbase"
 	"cas-scraper/scrapers/webbook"
 	"encoding/csv"
 	"flag"
 	"fmt"
 	"os"
-	"regexp"
 )
 
-var availableScrapers = map[string]scrapers.Scraper{"webbook.nist.gov": webbook.ScrapeWebbook{}}
-var casFormat, _ = regexp.Compile("[0-9]{2,7}-[0-9]{2,2}-[0-9]")
+var availableScrapers = map[string]scrapers.Scraper{
+	"webbook.nist.gov": webbook.ScrapeWebbook{},
+	"molbase.com":      molbase.ScrapeMolbase{},
+}
+var orderedScrapers = []scrapers.Scraper{
+	webbook.ScrapeWebbook{},
+	molbase.ScrapeMolbase{},
+}
 
 func main() {
 
@@ -22,11 +29,7 @@ func main() {
 	var source string
 	var quick string
 
-	flag.StringVar(&source, "source", "webbook.nist.gov", "Source sit for retrieving data, default chemsynt")
-	flag.StringVar(&input, "input", "", "Source CSV file for input. Expected to have single column or column label of 'Cas number'\nPossible values:")
-	flag.StringVar(&output, "output", "", "Output CSV file containing results of parsing. Will contain original info from CSV")
-	flag.StringVar(&quick, "quick", "", "Provide single CAS id for testing or quick reference")
-
+	setupFlags(&input, &output, &source, &quick)
 	flag.Parse()
 
 	fmt.Printf(" HELLOOO %s", os.Args)
@@ -44,11 +47,69 @@ func main() {
 		lines = [][]string{{quick}}
 		fmt.Printf("Quick lines %s\n\r", lines)
 	}
-	headerRow := checkHeaderRow(lines)
-	casNumberColumn := checkCasColumn(lines, headerRow)
+
+	headerRow := csvutil.CheckHeaderRow(lines)
+	casNumberColumn := csvutil.CheckCasColumn(lines, headerRow)
+
+	scraper := availableScrapers[source]
 	//TODO: Refactor to call once for each CAS and allow cycling providers.
-	outputLines, _ := availableScrapers[source].RunScrape(lines, headerRow, casNumberColumn)
+	outputLines := asyncCrawl(lines, headerRow, casNumberColumn, scraper)
 	writeFile(outputLines, output)
+
+}
+func setupFlags(input *string, output *string, source *string, quick *string) {
+	available := ""
+	for k, _ := range availableScrapers {
+		available = available + k + "\n"
+	}
+	flag.StringVar(source, "source", "", "Source site for retrieving data. If not set the scraping will use scrapers in order until procurring a result.\r\n"+available)
+	flag.StringVar(input, "input", "", "Source CSV file for input. Expected to have single column or column label of 'Cas number'\nPossible values:")
+	flag.StringVar(output, "output", "", "Output CSV file containing results of parsing. Will contain original info from CSV")
+	flag.StringVar(quick, "quick", "", "Provide single CAS id for testing or quick reference")
+}
+
+/**
+* Creates a Go routine per cas-number and awaits scraping.
+* If a single scraper is provided only this will be used. Otherwise errors will trigger re-scraping with the next scraper.
+ */
+func asyncCrawl(lines [][]string, headerRow bool, casColumn int, scraper scrapers.Scraper) [][]string {
+	targetResponses := len(lines)
+
+	if headerRow {
+		targetResponses = targetResponses - 1
+	}
+
+	channel := make(chan scrapers.Result)
+	for i, line := range lines {
+		//Ignore header row if found
+		fmt.Printf("%d %s", i, line)
+		if !headerRow || i > 0 {
+			line := csvutil.Line{Columns: line, RowNumber: i, CasColumn: casColumn}
+			if scraper == nil {
+				go orderedScrapers[0].CrawlScrape(line, channel, 0)
+			} else {
+				go scraper.CrawlScrape(line, channel, 0)
+			}
+		}
+	}
+	//Waits for completion of all Go routines, resubmits go routine for errors.
+	lineBuffer := make([][]string, len(lines))
+	for i := 0; i < targetResponses; i++ {
+		if !headerRow || i > 0 {
+			result := <-channel
+			lineBuffer[result.Line.RowNumber] = result.Line.Columns
+			if result.Error == nil || scraper != nil || result.ScrapeIndex+1 == len(orderedScrapers) {
+				fmt.Printf("Result for %s, error: %s", result.Line.Columns[casColumn], result.Error)
+			} else {
+				fmt.Printf("Error! Retrying with next scraper for %s", result.Line.Columns[casColumn])
+				targetResponses++ //Wait for one more result.
+				go orderedScrapers[0].CrawlScrape(result.Line, channel, result.ScrapeIndex+1)
+			}
+
+		}
+	}
+	return lineBuffer
+
 }
 
 func readFile(filePath string) [][]string {
@@ -68,33 +129,6 @@ func readFile(filePath string) [][]string {
 	return lines
 }
 
-func checkCasColumn(lines [][]string, headerRow bool) int {
-	row := 0
-	if headerRow {
-		row = 1
-	}
-	for i, column := range lines[row] {
-		if casFormat.MatchString(column) {
-			fmt.Printf("Found CAS number column number on column %d.\n", i)
-			return i
-		}
-	}
-	fmt.Printf("No CAS-number found on row %d, do you have empty rows or rows not containing CAS number?\n", row)
-	os.Exit(1)
-	return 0
-}
-
-func checkHeaderRow(lines [][]string) bool {
-	for _, column := range lines[0] {
-		if casFormat.MatchString(column) {
-			fmt.Println("Found CAS numbers on first row, assuming no header row.\n\r")
-			return false
-		}
-	}
-	fmt.Println("Found no CAS numbers on first row, assuming header row.\n\r")
-	return true
-}
-
 func writeFile(lines [][]string, targetFile string) {
 	/*	_, err := os.Stat(targetFile)
 		if err != nil && os.IsNotExist(err) {
@@ -111,5 +145,4 @@ func writeFile(lines [][]string, targetFile string) {
 		}
 	}
 	w.WriteAll(lines)
-
 }
